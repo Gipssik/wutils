@@ -5,13 +5,17 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::Sender;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
 const WM_TRAY: u32 = WM_APP + 1;
+/// Sent to the tray window by a second launch: show the settings window.
+const WM_SHOW_EXISTING: u32 = WM_APP + 2;
+const TRAY_CLASS: PCWSTR = w!("WutilsTrayWnd");
 const ID_OPEN: usize = 1;
 const ID_EXIT: usize = 2;
 const TRAY_UID: u32 = 1;
@@ -132,6 +136,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             LRESULT(0)
         }
+        WM_SHOW_EXISTING => {
+            HANDLERS.with(|h| {
+                if let Some(h) = h.borrow().as_ref() {
+                    (h.on_open)();
+                }
+            });
+            LRESULT(0)
+        }
         WM_DESTROY => {
             let data = NOTIFYICONDATAW {
                 cbSize: size_of::<NOTIFYICONDATAW>() as u32,
@@ -157,7 +169,7 @@ pub fn run(handlers: Handlers, hwnd_tx: Sender<isize>) {
     unsafe {
         TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed);
         let hinst = GetModuleHandleW(None).unwrap_or_default();
-        let class = w!("WutilsTrayWnd");
+        let class = TRAY_CLASS;
         let wc = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: hinst.into(),
@@ -197,6 +209,36 @@ pub fn run(handlers: Handlers, hwnd_tx: Sender<isize>) {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+    }
+}
+
+/// Single-instance guard, called first thing in `main`. Returns `false` when
+/// Wutils is already running in this session — after asking that instance
+/// (via its tray window) to show its settings window — and the caller exits.
+/// Two instances would fight over the registry and the injected hook.
+pub fn claim_single_instance() -> bool {
+    unsafe {
+        let mutex = CreateMutexW(None, false, w!(r"Local\Wutils.SingleInstance"));
+        if GetLastError() != ERROR_ALREADY_EXISTS {
+            // Ours: the handle stays open (owned) for the life of the process.
+            return true;
+        }
+        if let Ok(h) = mutex {
+            let _ = CloseHandle(h);
+        }
+        // The other instance may still be starting up; give its tray window a moment.
+        for _ in 0..30 {
+            if let Ok(hwnd) = FindWindowW(TRAY_CLASS, None) {
+                let mut pid = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                // We were just launched by the user, so we may hand over foreground rights.
+                let _ = AllowSetForegroundWindow(pid);
+                let _ = PostMessageW(Some(hwnd), WM_SHOW_EXISTING, WPARAM(0), LPARAM(0));
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
     }
 }
 

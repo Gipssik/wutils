@@ -164,7 +164,9 @@ section*, so the app shows a "Restart Explorer to finish updating" banner.
 
 ### App shell (`app/src/main.rs`, `tray.rs`, `model.rs`)
 Slint runs the event loop (`run_event_loop_until_quit`, so closing the window to
-tray doesn't exit). The tray is a Win32 `Shell_NotifyIcon` on its own thread
+tray doesn't exit). Single instance per session: `tray::claim_single_instance`
+holds the `Local\Wutils.SingleInstance` mutex; a second launch posts
+`WM_SHOW_EXISTING` to the running instance's tray window and exits. The tray is a Win32 `Shell_NotifyIcon` on its own thread
 with a hidden top-level window (icon = resource `IDI_APPICON` = 1 from
 `wutils.rc`, loaded at `SM_CXSMICON`); it talks to the UI only via
 `slint::invoke_from_event_loop`. Worker threads (update check) never hold the

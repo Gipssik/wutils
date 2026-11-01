@@ -4158,6 +4158,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",
@@ -5746,9 +5747,10 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "wutils"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "embed-resource",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "sha2",
@@ -5762,14 +5764,14 @@ dependencies = [
 
 [[package]]
 name = "wutils-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "wutils-shell"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "windows",
  "windows-core",
@@ -5778,7 +5780,7 @@ dependencies = [
 
 [[package]]
 name = "wutils-taskbar"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "minhook",
  "windows",
@@ -5877,7 +5879,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "sha2",
 ]

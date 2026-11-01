@@ -53,6 +53,9 @@ const RESTART_FOR_MENU: &str = "Restart Explorer to apply the context menu chang
 const RESTART_FOR_UPDATE: &str = "Restart Explorer to finish updating Wutils.";
 
 fn main() -> Result<(), slint::PlatformError> {
+    if !tray::claim_single_instance() {
+        return Ok(());
+    }
     let start_minimized_arg = std::env::args().any(|a| a == "--minimized");
 
     // Diagnostic logging: `set WUTILS_LOG=1` before launching to trace the
@@ -320,6 +323,7 @@ fn start_tray(ui: &AppWindow) -> isize {
             if let Some(ui) = open_weak.upgrade() {
                 let _ = ui.show();
                 ui.window().set_minimized(false);
+                bring_to_front(&ui);
             }
         });
     });
@@ -344,6 +348,22 @@ fn start_tray(ui: &AppWindow) -> isize {
         tray::run(tray::Handlers { on_open, on_exit, on_shell_restart }, tx);
     });
     rx.recv().unwrap_or(0)
+}
+
+/// Raises an already-visible window above others (`show` alone doesn't when
+/// the window is open but behind other windows).
+fn bring_to_front(ui: &AppWindow) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = ui.window().window_handle();
+    if let Ok(handle) = handle.window_handle()
+        && let RawWindowHandle::Win32(h) = handle.as_raw()
+    {
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(windows::Win32::Foundation::HWND(
+                h.hwnd.get() as *mut _,
+            ));
+        }
+    }
 }
 
 /// Checks for updates off the UI thread, then refreshes the banner on it.
