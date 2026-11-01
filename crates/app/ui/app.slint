@@ -5,7 +5,7 @@
 // feature means adding items in Rust; this file only changes when a new *kind*
 // of control is needed.
 
-import { Switch, ComboBox, Button, LineEdit, ScrollView, Palette } from "std-widgets.slint";
+import { ComboBox, Button, LineEdit, ScrollView, Palette } from "std-widgets.slint";
 
 export enum ItemKind { header, toggle, choice, button, info }
 
@@ -49,9 +49,18 @@ global Theme {
     out property <color> text: dark ? #ffffff : #1a1a1a;
     out property <color> text-secondary: dark ? #c5c5c5 : #5d5d5d;
     out property <color> text-disabled: dark ? #787878 : #a0a0a0;
-    out property <color> info-bg: dark ? #1f3a4d : #dbeaf7;
+    out property <color> info-bg: dark ? #3b2a1e : #fdeee3;
     out property <color> error-bg: dark ? #442726 : #fde7e9;
-    out property <brush> accent: Palette.accent-background;
+    // Brand orange (the icon's #F7630C). The app's own accent instead of the
+    // system one, so switches and buttons match the logo. In light mode it's a
+    // touch darker so white text on it stays readable; dark mode uses a lighter
+    // tint with dark text, as Fluent does.
+    out property <color> brand: #f7630c;
+    out property <color> accent: dark ? #ff8c42 : #e8590c;
+    out property <color> accent-hover: dark ? #ff9d5c : #d65108;
+    out property <color> accent-pressed: dark ? #f07f35 : #c44a07;
+    out property <color> on-accent: dark ? #1a1a1a : #ffffff;
+    out property <color> control-hover: dark ? #ffffff0f : #0000000a;
 }
 
 component Icon inherits Text {
@@ -60,16 +69,87 @@ component Icon inherits Text {
     horizontal-alignment: center;
 }
 
-component Logo inherits Rectangle {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    background: @linear-gradient(135deg, #4f8cff 0%, #8b5cf6 100%);
-    Text {
-        text: "W";
-        color: white;
-        font-size: 15px;
-        font-weight: 700;
+// Same mark as the app icon: a plain orange W.
+component Logo inherits Text {
+    text: "W";
+    color: Theme.brand;
+    font-family: "Segoe UI";
+    font-size: 22px;
+    font-weight: 700;
+    vertical-alignment: center;
+}
+
+// Fluent-style toggle in the brand accent (std `Switch` follows the system accent).
+component ToggleSwitch inherits Rectangle {
+    in property <bool> enabled: true;
+    in-out property <bool> checked;
+    callback toggled(bool);
+
+    width: 40px;
+    height: 20px;
+    border-radius: 10px;
+    border-width: checked ? 0px : 1px;
+    border-color: enabled ? Theme.text-secondary : Theme.text-disabled;
+    background: !checked ? (touch.has-hover && enabled ? Theme.control-hover : transparent)
+        : !enabled ? Theme.text-disabled
+        : touch.pressed ? Theme.accent-pressed
+        : touch.has-hover ? Theme.accent-hover : Theme.accent;
+    accessible-role: switch;
+    accessible-checkable: true;
+    accessible-checked: checked;
+    accessible-enabled: enabled;
+    accessible-action-default => { toggle(); }
+
+    function toggle() {
+        root.checked = !root.checked;
+        root.toggled(root.checked);
+    }
+
+    Rectangle {
+        // The knob grows on hover and stretches while pressed, like Windows 11.
+        width: touch.pressed ? 17px : touch.has-hover ? 14px : 12px;
+        height: touch.has-hover || touch.pressed ? 14px : 12px;
+        border-radius: self.height / 2;
+        x: root.checked ? parent.width - self.width - 4px : 4px;
+        y: (parent.height - self.height) / 2;
+        background: root.checked ? Theme.on-accent : root.enabled ? Theme.text-secondary : Theme.text-disabled;
+        animate x, width, height { duration: 120ms; easing: ease-out; }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { toggle(); }
+    }
+}
+
+// Primary (filled) button in the brand accent.
+component AccentButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+
+    height: 32px;
+    min-width: 96px;
+    border-radius: 4px;
+    background: touch.pressed ? Theme.accent-pressed : touch.has-hover ? Theme.accent-hover : Theme.accent;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: 600;
+            color: Theme.on-accent;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
     }
 }
 
@@ -198,10 +278,10 @@ component SettingCard inherits Rectangle {
 
         if item.kind == ItemKind.toggle: VerticalLayout {
             alignment: center;
-            Switch {
+            ToggleSwitch {
                 checked <=> root.checked;
                 enabled: item.enabled;
-                toggled => { root.toggled(self.checked); }
+                toggled(v) => { root.toggled(v); }
             }
         }
         if item.kind == ItemKind.choice: VerticalLayout {
@@ -277,10 +357,12 @@ component BannerBar inherits Rectangle {
             horizontal-stretch: 1;
             color: Theme.text;
         }
-        if banner.action != "": Button {
-            text: banner.action;
-            primary: true;
-            clicked => { root.action(); }
+        if banner.action != "": VerticalLayout {
+            alignment: center;
+            AccentButton {
+                text: banner.action;
+                clicked => { root.action(); }
+            }
         }
     }
 }
@@ -319,9 +401,10 @@ export component AppWindow inherits Window {
             spacing: 4px;
 
             HorizontalLayout {
+                alignment: start;
                 padding-left: 6px;
                 padding-bottom: 10px;
-                spacing: 12px;
+                spacing: 10px;
                 height: 44px;
                 VerticalLayout {
                     alignment: center;

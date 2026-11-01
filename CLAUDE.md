@@ -186,6 +186,12 @@ Search and per-page rendering work automatically from the model. New *kinds* of
 control (beyond toggle/choice/button/info/header) are the only reason to edit
 `app.slint` / the `ItemKind` enum.
 
+Colors: the brand accent is orange (`Theme.brand` #F7630C, the icon's color;
+`Theme.accent*` for controls). std-widgets' `Switch` / primary `Button` follow
+the *system* accent and Slint can't override it, so toggles and the banner
+button are our own `ToggleSwitch` / `AccentButton`. Use those, not std ones,
+for anything accent-colored.
+
 ## Commands
 
 ```
