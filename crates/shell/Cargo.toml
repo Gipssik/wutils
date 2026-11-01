@@ -1,0 +1,15 @@
+[package]
+name = "wutils-shell"
+description = "In-process COM shell extensions (context menu items) loaded by explorer.exe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "wutils_shell"
+crate-type = ["cdylib"]
+
+[dependencies]
+windows.workspace = true
+windows-core = "0.62"
+wutils-core.workspace = true

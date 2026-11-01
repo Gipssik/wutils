@@ -1,0 +1,25 @@
+[package]
+name = "wutils"
+description = "Wutils: a fast Windows 11 utilities app (taskbar, context menu, HDR)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+default-run = "wutils"
+
+[[bin]]
+name = "wutils"
+path = "src/main.rs"
+
+[dependencies]
+wutils-core.workspace = true
+windows.workspace = true
+slint.workspace = true
+serde.workspace = true
+toml.workspace = true
+ureq.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+embed-resource.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "wutils-taskbar"
+description = "Hook DLL injected into explorer.exe that moves the primary taskbar to another monitor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "wutils_taskbar"
+crate-type = ["cdylib"]
+
+[dependencies]
+windows.workspace = true
+wutils-core.workspace = true
+minhook.workspace = true

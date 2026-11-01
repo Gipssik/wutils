@@ -1,0 +1,6 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+
+[target.x86_64-pc-windows-msvc]
+# Static CRT: no VC++ redistributable needed, DLLs load cleanly in explorer.exe.
+rustflags = ["-C", "target-feature=+crt-static"]

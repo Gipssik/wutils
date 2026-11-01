@@ -1,0 +1,9 @@
+[package]
+name = "wutils-core"
+description = "Shared Win32 helpers for Wutils: displays/HDR, registry, Explorer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+windows.workspace = true

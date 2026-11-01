@@ -1,0 +1,37 @@
+# Builds and publishes a Wutils release when a v* tag is pushed.
+# The uploaded assets (wutils-x64.zip + .sha256) are what the in-app updater
+# downloads and verifies.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Package
+        run: cargo xtask dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/wutils-x64.zip
+            dist/wutils-x64.zip.sha256
+          generate_release_notes: true

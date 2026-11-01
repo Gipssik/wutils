@@ -1,0 +1,413 @@
+// Wutils settings window.
+//
+// The UI is data-driven: Rust sends a list of pages for the sidebar and a flat
+// list of `SettingItem`s for the current page (or for search results). Adding a
+// feature means adding items in Rust; this file only changes when a new *kind*
+// of control is needed.
+
+import { Switch, ComboBox, Button, LineEdit, ScrollView, Palette } from "std-widgets.slint";
+
+export enum ItemKind { header, toggle, choice, button, info }
+
+export struct SettingItem {
+    id: string,
+    kind: ItemKind,
+    title: string,
+    description: string,
+    // Small pill next to the title, e.g. "Requires classic context menu".
+    badge: string,
+    // Page title; shown above the card in search results.
+    page: string,
+    enabled: bool,
+    checked: bool,
+    choices: [string],
+    current: int,
+    // Button label for `button` items.
+    action: string,
+}
+
+export struct NavPage {
+    title: string,
+    icon: string,
+}
+
+export struct Banner {
+    visible: bool,
+    text: string,
+    action: string,
+    error: bool,
+}
+
+global Theme {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    out property <color> window: dark ? #202020 : #f3f3f3;
+    out property <color> card: dark ? #2b2b2b : #fbfbfb;
+    out property <color> card-hover: dark ? #323232 : #f6f6f6;
+    out property <color> card-border: dark ? #1d1d1d : #e5e5e5;
+    out property <color> nav-hover: dark ? #2d2d2d : #eaeaea;
+    out property <color> nav-selected: dark ? #2d2d2d : #e9e9e9;
+    out property <color> text: dark ? #ffffff : #1a1a1a;
+    out property <color> text-secondary: dark ? #c5c5c5 : #5d5d5d;
+    out property <color> text-disabled: dark ? #787878 : #a0a0a0;
+    out property <color> info-bg: dark ? #1f3a4d : #dbeaf7;
+    out property <color> error-bg: dark ? #442726 : #fde7e9;
+    out property <brush> accent: Palette.accent-background;
+}
+
+component Icon inherits Text {
+    font-family: "Segoe Fluent Icons";
+    vertical-alignment: center;
+    horizontal-alignment: center;
+}
+
+component Logo inherits Rectangle {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: @linear-gradient(135deg, #4f8cff 0%, #8b5cf6 100%);
+    Text {
+        text: "W";
+        color: white;
+        font-size: 15px;
+        font-weight: 700;
+    }
+}
+
+component NavItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> title;
+    in property <bool> selected;
+    callback clicked;
+
+    height: 38px;
+    border-radius: 5px;
+    background: selected ? Theme.nav-selected : touch.has-hover ? Theme.nav-hover : transparent;
+    accessible-role: tab;
+    accessible-label: title;
+
+    Rectangle {
+        x: 0;
+        width: 3px;
+        height: selected ? 16px : 0px;
+        border-radius: 1.5px;
+        background: Theme.accent;
+        animate height { duration: 150ms; easing: ease-out; }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        spacing: 14px;
+        Icon {
+            text: root.icon;
+            font-size: 16px;
+            width: 18px;
+            color: Theme.text;
+        }
+        Text {
+            text: root.title;
+            font-size: 14px;
+            vertical-alignment: center;
+            color: Theme.text;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component Badge inherits Rectangle {
+    in property <string> text;
+    border-radius: 4px;
+    background: Theme.dark ? #3a3a3a : #e6e6e6;
+    height: 18px;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.text;
+            font-size: 11px;
+            vertical-alignment: center;
+            color: Theme.text-secondary;
+        }
+    }
+}
+
+component SettingCard inherits Rectangle {
+    in property <SettingItem> item;
+    in property <bool> show-page;
+    in-out property <bool> checked;
+    in-out property <int> current;
+    callback toggled(bool);
+    callback selected(int);
+    callback action();
+
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Theme.card-border;
+    background: hover.has-hover && item.enabled ? Theme.card-hover : Theme.card;
+
+    hover := TouchArea {
+        // Clicking anywhere on a toggle card flips it, like Windows Settings.
+        clicked => {
+            if (item.kind == ItemKind.toggle && item.enabled) {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 13px;
+        padding-bottom: 13px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+
+            if root.show-page && item.page != "": Text {
+                text: item.page;
+                font-size: 11px;
+                color: Theme.accent;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Text {
+                    text: item.title;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    color: item.enabled ? Theme.text : Theme.text-disabled;
+                }
+                if item.badge != "": VerticalLayout {
+                    alignment: center;
+                    Badge { text: item.badge; }
+                }
+            }
+            if item.description != "": Text {
+                text: item.description;
+                font-size: 12px;
+                wrap: word-wrap;
+                color: item.enabled ? Theme.text-secondary : Theme.text-disabled;
+            }
+        }
+
+        if item.kind == ItemKind.toggle: VerticalLayout {
+            alignment: center;
+            Switch {
+                checked <=> root.checked;
+                enabled: item.enabled;
+                toggled => { root.toggled(self.checked); }
+            }
+        }
+        if item.kind == ItemKind.choice: VerticalLayout {
+            alignment: center;
+            ComboBox {
+                min-width: 220px;
+                model: item.choices;
+                enabled: item.enabled;
+                current-index <=> root.current;
+                selected => { root.selected(self.current-index); }
+            }
+        }
+        if item.kind == ItemKind.button: VerticalLayout {
+            alignment: center;
+            Button {
+                text: item.action;
+                enabled: item.enabled;
+                clicked => { root.action(); }
+            }
+        }
+    }
+}
+
+component ItemView inherits VerticalLayout {
+    in property <SettingItem> item;
+    in property <bool> show-page;
+    in-out property <bool> checked;
+    in-out property <int> current;
+    callback toggled(bool);
+    callback selected(int);
+    callback action();
+
+    if item.kind == ItemKind.header: Text {
+        text: item.title;
+        font-size: 14px;
+        font-weight: 600;
+        color: Theme.text;
+        // Space above section headers; the layout spacing adds the rest.
+        height: self.preferred-height + 18px;
+        vertical-alignment: bottom;
+    }
+    if item.kind != ItemKind.header: SettingCard {
+        item: root.item;
+        show-page: root.show-page;
+        checked <=> root.checked;
+        current <=> root.current;
+        toggled(v) => { root.toggled(v); }
+        selected(i) => { root.selected(i); }
+        action => { root.action(); }
+    }
+}
+
+component BannerBar inherits Rectangle {
+    in property <Banner> banner;
+    callback action();
+
+    border-radius: 6px;
+    background: banner.error ? Theme.error-bg : Theme.info-bg;
+    HorizontalLayout {
+        padding: 12px;
+        padding-left: 16px;
+        spacing: 12px;
+        Icon {
+            text: banner.error ? "\u{E783}" : "\u{E946}";
+            font-size: 16px;
+            color: Theme.text;
+        }
+        Text {
+            text: banner.text;
+            font-size: 13px;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            color: Theme.text;
+        }
+        if banner.action != "": Button {
+            text: banner.action;
+            primary: true;
+            clicked => { root.action(); }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Wutils";
+    icon: @image-url("../../../assets/wutils.png");
+    preferred-width: 980px;
+    preferred-height: 680px;
+    min-width: 700px;
+    min-height: 460px;
+    background: Theme.window;
+    default-font-family: "Segoe UI Variable Text";
+
+    in property <[NavPage]> pages;
+    in property <int> current-page;
+    in property <bool> searching;
+    in property <string> heading;
+    in property <[SettingItem]> items;
+    in property <Banner> banner;
+    in property <string> version;
+
+    callback page-selected(int);
+    callback search-changed(string);
+    callback toggled(string, bool);
+    callback choice-selected(string, int);
+    callback action(string);
+    callback banner-action();
+
+    HorizontalLayout {
+        // Sidebar
+        VerticalLayout {
+            width: 280px;
+            padding: 14px;
+            padding-top: 12px;
+            spacing: 4px;
+
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-bottom: 10px;
+                spacing: 12px;
+                height: 44px;
+                VerticalLayout {
+                    alignment: center;
+                    Logo { }
+                }
+                Text {
+                    text: "Wutils";
+                    font-size: 15px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    color: Theme.text;
+                }
+            }
+
+            search := LineEdit {
+                placeholder-text: "Find a setting";
+                edited(text) => { root.search-changed(text); }
+            }
+            Rectangle { height: 10px; }
+
+            for page[i] in root.pages: NavItem {
+                icon: page.icon;
+                title: page.title;
+                selected: !root.searching && i == root.current-page;
+                clicked => {
+                    search.text = "";
+                    root.page-selected(i);
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+            Text {
+                text: "Version " + root.version;
+                font-size: 11px;
+                color: Theme.text-secondary;
+                horizontal-alignment: left;
+            }
+        }
+
+        // Content
+        VerticalLayout {
+            padding-top: 22px;
+            padding-left: 12px;
+            spacing: 14px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.heading;
+                font-size: 28px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+
+            if root.banner.visible: HorizontalLayout {
+                padding-right: 28px;
+                BannerBar {
+                    banner: root.banner;
+                    action => { root.banner-action(); }
+                }
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    alignment: start;
+                    spacing: 4px;
+                    padding-right: 28px;
+                    padding-bottom: 28px;
+
+                    for item in root.items: ItemView {
+                        item: item;
+                        show-page: root.searching;
+                        checked <=> item.checked;
+                        current <=> item.current;
+                        toggled(v) => { root.toggled(item.id, v); }
+                        selected(i) => { root.choice-selected(item.id, i); }
+                        action => { root.action(item.id); }
+                    }
+
+                    if root.items.length == 0: Text {
+                        text: "No settings match your search.";
+                        font-size: 13px;
+                        color: Theme.text-secondary;
+                    }
+                }
+            }
+        }
+    }
+}

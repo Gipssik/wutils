@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/app", "crates/shell", "crates/taskbar"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+repository = "https://github.com/Gipssik/wutils"
+
+[workspace.dependencies]
+wutils-core = { path = "crates/core" }
+minhook = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+slint = "1.18"
+slint-build = "1.18"
+# rustls (not native-tls): ureq 3 selects the rustls provider by default, and
+# rustls bundles its own roots — self-contained, no OS TLS dependency.
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+sha2 = "0.10"
+embed-resource = "3"
+
+[workspace.dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Devices_Display",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+
+# Fast-to-build but still optimized dependencies in dev builds (Slint is heavy).
+[profile.dev.package."*"]
+opt-level = 2
