@@ -97,6 +97,13 @@ silently restarted). Config is published first through the `.shared` section
 (`RWS`), visible to every process that maps the DLL; the app writes it by
 loading the same DLL and calling `wutils_configure`.
 
+**The section belongs to the DLL *file*.** The shell keeps whichever copy it
+loaded first (another install folder, `target\debug`) until it restarts, and
+injection skips a process that already has *any* `wutils_taskbar.dll` (two
+copies would stack hooks). So `features::configure_taskbar` writes to our copy
+**and** every copy found in the shell (`inject::loaded_copies`) — otherwise an
+app run from a different folder silently configures a section nobody reads.
+
 **Re-applying.** The taskbar only re-sticks in response to a display-change
 nudge delivered *from inside its own process*. So: the DLL's install thread
 sends it once after hooking, and a **watcher thread** in the DLL re-sends it

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Sender};
 
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::{FreeLibrary, RECT};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::core::{HSTRING, Result, s};
 use wutils_core::clsid;
@@ -34,24 +34,49 @@ pub fn taskbar_dll() -> PathBuf {
 }
 
 /// Writes the taskbar config into the DLL's shared section (visible to every
-/// process that has the DLL mapped, including Explorer).
+/// process that has that DLL file mapped, including Explorer).
+///
+/// The section belongs to the *file*, so this writes to our copy and to every
+/// other copy the shell already has loaded (another folder, a dev build):
+/// injection skips processes that have one, and they'd otherwise never see it.
 fn configure_taskbar(enabled: bool, rva: u32, rect: RECT) {
+    let ours = taskbar_dll();
+    // Our copy stays loaded in the app: if no shell process maps it yet, this
+    // process keeps its section (and the config) alive until injection.
+    configure_copy(&ours, enabled, rva, rect, true);
+    for copy in inject::loaded_copies() {
+        if !copy.as_os_str().eq_ignore_ascii_case(ours.as_os_str()) {
+            configure_copy(&copy, enabled, rva, rect, false);
+        }
+    }
+}
+
+fn configure_copy(dll: &Path, enabled: bool, rva: u32, rect: RECT, keep_loaded: bool) {
     type ConfigureFn = unsafe extern "system" fn(u32, u32, u32, *const RECT);
     unsafe {
-        let Ok(module) = LoadLibraryW(&HSTRING::from(taskbar_dll().as_os_str())) else {
-            wutils_core::log::line("configure: LoadLibraryW(taskbar dll) FAILED");
+        let Ok(module) = LoadLibraryW(&HSTRING::from(dll.as_os_str())) else {
+            wutils_core::log::line(&format!("configure: LoadLibraryW({}) FAILED", dll.display()));
             return;
         };
-        let Some(proc) = GetProcAddress(module, s!("wutils_configure")) else {
-            wutils_core::log::line("configure: GetProcAddress(wutils_configure) FAILED");
-            return;
-        };
-        let configure: ConfigureFn = std::mem::transmute(proc as *const c_void);
-        configure(enabled as u32, 0, rva, &rect);
-        wutils_core::log::line(&format!(
-            "configure: enabled={enabled} rva={rva:#x} rect=({},{},{},{})",
-            rect.left, rect.top, rect.right, rect.bottom
-        ));
+        if let Some(proc) = GetProcAddress(module, s!("wutils_configure")) {
+            let configure: ConfigureFn = std::mem::transmute(proc as *const c_void);
+            configure(enabled as u32, 0, rva, &rect);
+            wutils_core::log::line(&format!(
+                "configure {}: enabled={enabled} rva={rva:#x} rect=({},{},{},{})",
+                dll.display(),
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom
+            ));
+        } else {
+            wutils_core::log::line(&format!("configure: no wutils_configure in {}", dll.display()));
+        }
+        // A foreign copy is mapped by the shell, which keeps its section alive;
+        // don't pin the file (e.g. a dev build that needs rebuilding).
+        if !keep_loaded {
+            let _ = FreeLibrary(module);
+        }
     }
 }
 

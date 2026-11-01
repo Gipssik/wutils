@@ -9,7 +9,7 @@
 //! published separately through the DLL's shared section before injecting.
 
 use std::ffi::c_void;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Diagnostics::ToolHelp::*;
@@ -43,18 +43,17 @@ fn pids_named(names: &[&str]) -> Vec<u32> {
     pids
 }
 
-/// Whether `dll_name` is already loaded in process `pid`.
-fn is_loaded(pid: u32, dll_name: &str) -> bool {
+/// Full path of the `dll_name` module loaded in process `pid`, if any. Matched
+/// by name, so this also finds a copy loaded from another folder.
+fn loaded_path(pid: u32, dll_name: &str) -> Option<PathBuf> {
     unsafe {
-        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) else {
-            return false;
-        };
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid).ok()?;
         let mut entry = MODULEENTRY32W { dwSize: size_of::<MODULEENTRY32W>() as u32, ..Default::default() };
-        let mut found = false;
+        let mut found = None;
         if Module32FirstW(snapshot, &mut entry).is_ok() {
             loop {
                 if wutils_core::from_wide(&entry.szModule).eq_ignore_ascii_case(dll_name) {
-                    found = true;
+                    found = Some(PathBuf::from(wutils_core::from_wide(&entry.szExePath)));
                     break;
                 }
                 if Module32NextW(snapshot, &mut entry).is_err() {
@@ -119,10 +118,27 @@ fn open(pid: u32) -> Result<HANDLE> {
     }
 }
 
-/// `LoadLibraryW` the DLL into one process (unless already loaded).
+/// Every distinct copy of the hook DLL loaded in the shell processes. Usually
+/// just ours, but the shell keeps whichever copy it loaded first — e.g. one from
+/// a dev build or another install folder — until it restarts. Each copy has its
+/// own `.shared` section, so config must be written to all of them.
+pub fn loaded_copies() -> Vec<PathBuf> {
+    let mut copies: Vec<PathBuf> = Vec::new();
+    for pid in pids_named(TARGETS) {
+        if let Some(path) = loaded_path(pid, DLL_NAME)
+            && !copies.iter().any(|c| c.as_os_str().eq_ignore_ascii_case(path.as_os_str()))
+        {
+            copies.push(path);
+        }
+    }
+    copies
+}
+
+/// `LoadLibraryW` the DLL into one process (unless a copy is already loaded:
+/// a second copy would stack a second set of hooks).
 fn inject_one(pid: u32, dll: &HSTRING) -> Result<()> {
-    if is_loaded(pid, DLL_NAME) {
-        wutils_core::log::line(&format!("inject: pid={pid} already loaded"));
+    if let Some(path) = loaded_path(pid, DLL_NAME) {
+        wutils_core::log::line(&format!("inject: pid={pid} already loaded from {}", path.display()));
         return Ok(());
     }
     let process = match open(pid) {
