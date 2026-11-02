@@ -19,6 +19,11 @@ const TRAY_CLASS: PCWSTR = w!("WutilsTrayWnd");
 const ID_OPEN: usize = 1;
 const ID_EXIT: usize = 2;
 const TRAY_UID: u32 = 1;
+/// Retries `NIM_ADD` while the shell isn't up yet (started at sign-in).
+const ADD_RETRY_TIMER: usize = 1;
+const ADD_RETRY_MS: u32 = 1000;
+/// Two minutes of retries; `TaskbarCreated` still covers a later shell.
+const ADD_RETRY_MAX: u32 = 120;
 /// `IDI_APPICON` in `wutils.rc`.
 const IDI_APPICON: u16 = 1;
 
@@ -38,6 +43,7 @@ thread_local! {
     static HANDLERS: std::cell::RefCell<Option<Handlers>> = const { std::cell::RefCell::new(None) };
     /// Loaded once and reused for every `NIM_ADD` (Explorer restarts re-add it).
     static ICON: std::cell::Cell<HICON> = std::cell::Cell::new(HICON::default());
+    static ADD_RETRIES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// The app icon from the exe's resources at the small-icon size the tray draws,
@@ -107,22 +113,44 @@ fn show_menu(hwnd: HWND) {
     }
 }
 
+fn shell_restarted() {
+    HANDLERS.with(|h| {
+        if let Some(h) = h.borrow().as_ref() {
+            (h.on_shell_restart)();
+        }
+    });
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let taskbar_created = TASKBAR_CREATED.load(Ordering::Relaxed);
     if taskbar_created != 0 && msg == taskbar_created {
         // Explorer restarted: our icon and injected DLL are gone. Re-add both.
         let data = notify_data(hwnd);
         unsafe {
+            let _ = KillTimer(Some(hwnd), ADD_RETRY_TIMER);
             let _ = Shell_NotifyIconW(NIM_ADD, &data);
         }
-        HANDLERS.with(|h| {
-            if let Some(h) = h.borrow().as_ref() {
-                (h.on_shell_restart)();
-            }
-        });
+        shell_restarted();
         return LRESULT(0);
     }
     match msg {
+        WM_TIMER if wparam.0 == ADD_RETRY_TIMER => {
+            // Started before the shell (sign-in): once the icon goes in, the
+            // taskbar exists, so apply what needed it — in case the
+            // TaskbarCreated broadcast went out before our window existed.
+            let added = unsafe { Shell_NotifyIconW(NIM_ADD, &notify_data(hwnd)) }.as_bool();
+            let tries = ADD_RETRIES.get() + 1;
+            ADD_RETRIES.set(tries);
+            if added || tries >= ADD_RETRY_MAX {
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), ADD_RETRY_TIMER);
+                }
+            }
+            if added {
+                shell_restarted();
+            }
+            LRESULT(0)
+        }
         WM_TRAY => {
             let event = (lparam.0 & 0xFFFF) as u32;
             match event {
@@ -202,7 +230,10 @@ pub fn run(handlers: Handlers, hwnd_tx: Sender<isize>) {
         }
 
         let data = notify_data(hwnd);
-        let _ = Shell_NotifyIconW(NIM_ADD, &data);
+        if !Shell_NotifyIconW(NIM_ADD, &data).as_bool() {
+            // No shell yet (sign-in): keep trying until the taskbar is up.
+            SetTimer(Some(hwnd), ADD_RETRY_TIMER, ADD_RETRY_MS, None);
+        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -214,9 +245,10 @@ pub fn run(handlers: Handlers, hwnd_tx: Sender<isize>) {
 
 /// Single-instance guard, called first thing in `main`. Returns `false` when
 /// Wutils is already running in this session — after asking that instance
-/// (via its tray window) to show its settings window — and the caller exits.
-/// Two instances would fight over the registry and the injected hook.
-pub fn claim_single_instance() -> bool {
+/// (via its tray window) to show its settings window, if `show_existing` — and
+/// the caller exits. Two instances would fight over the registry and the
+/// injected hook.
+pub fn claim_single_instance(show_existing: bool) -> bool {
     unsafe {
         let mutex = CreateMutexW(None, false, w!(r"Local\Wutils.SingleInstance"));
         if GetLastError() != ERROR_ALREADY_EXISTS {
@@ -225,6 +257,9 @@ pub fn claim_single_instance() -> bool {
         }
         if let Ok(h) = mutex {
             let _ = CloseHandle(h);
+        }
+        if !show_existing {
+            return false;
         }
         // The other instance may still be starting up; give its tray window a moment.
         for _ in 0..30 {

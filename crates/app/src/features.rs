@@ -15,10 +15,7 @@ use wutils_core::clsid;
 use wutils_core::display::{self, Monitor};
 
 use crate::settings::Settings;
-use crate::{inject, shellreg, symbols};
-
-const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const RUN_VALUE: &str = "Wutils";
+use crate::{inject, shellreg, startup, symbols};
 
 /// Directory the running executable lives in; DLLs sit next to it.
 pub fn exe_dir() -> PathBuf {
@@ -135,6 +132,12 @@ pub fn apply_taskbar_async(settings: Settings) {
                     latest = newer;
                 }
                 let _ = apply_taskbar(&latest);
+                // At sign-in this first runs before the shell exists; the boost
+                // lasts until a pass that found the taskbar up (the tray
+                // re-applies when it appears).
+                if wutils_core::explorer::taskbar_window().is_some() {
+                    startup::end_boost();
+                }
             }
         });
         tx
@@ -160,13 +163,9 @@ pub fn apply_classic_menu(settings: &Settings) -> Result<bool> {
     Ok(changed)
 }
 
-pub fn set_startup(enabled: bool) -> Result<()> {
-    if enabled {
-        let exe = std::env::current_exe().unwrap_or_default();
-        wutils_core::reg::set_string(RUN_KEY, Some(RUN_VALUE), &format!("\"{}\" --minimized", exe.display()))
-    } else {
-        wutils_core::reg::delete_value(RUN_KEY, RUN_VALUE)
-    }
+/// Start with Windows (a logon task; see `startup`). Runs off-thread.
+pub fn set_startup(enabled: bool) {
+    startup::apply_async(enabled);
 }
 
 /// Applies everything that can be set without restarting Explorer, on startup.
@@ -174,5 +173,5 @@ pub fn set_startup(enabled: bool) -> Result<()> {
 pub fn apply_all_quiet(settings: &Settings) {
     let _ = apply_context_extensions(settings);
     apply_taskbar_async(settings.clone());
-    let _ = set_startup(settings.general.start_with_windows);
+    set_startup(settings.general.start_with_windows);
 }

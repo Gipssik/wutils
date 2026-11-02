@@ -47,7 +47,9 @@ Explorer without needing a VC++ redistributable. Release profile uses fat LTO.
   user's registry. Changing one orphans existing registrations. Add new GUIDs,
   don't edit old ones.
 - **Per-user only.** All registry writes go to `HKCU` (`core::reg` only opens
-  `HKEY_CURRENT_USER`). No elevation, ever.
+  `HKEY_CURRENT_USER`). No elevation, ever. (The one non-registry system
+  object is the start-with-Windows logon task, registered for the current
+  user's SID only — a standard user may do that.)
 - **Idempotent apply.** `features::apply_*` run on startup *and* on every change;
   they must converge, not accumulate.
 
@@ -171,6 +173,28 @@ with a hidden top-level window (icon = resource `IDI_APPICON` = 1 from
 `wutils.rc`, loaded at `SM_CXSMICON`); it talks to the UI only via
 `slint::invoke_from_event_loop`. Worker threads (update check) never hold the
 `Rc<State>` — cross-thread state is `Arc<Mutex>`/`Arc<Atomic>` in `Signals`.
+
+### Start with Windows (`app/src/startup.rs`)
+A per-user **logon scheduled task** (`Wutils (<username>)`, trigger + principal
+= the user's SID, no delay, `Priority` 4, no time limit), *not* the `Run` key:
+Explorer runs `Run` entries serially, waiting on each, so a `Run` launch came
+minutes after sign-in. If task registration fails, it falls back to the `Run`
+key; apply always leaves exactly one of the two (and removes both when off).
+Registration is COM on its own MTA worker thread.
+
+The task passes `--autostart` (older builds registered `--minimized`; both are
+honored): start in the tray, and if Wutils is already running exit *quietly*
+instead of showing the window. It also runs at above-normal priority until a
+taskbar apply finds the shell up (`startup::boost` / `end_boost`).
+
+Starting at sign-in usually means starting **before the shell**. So: the tray
+retries `NIM_ADD` every second and, when it finally succeeds, runs the same
+`on_shell_restart` path as `TaskbarCreated` (in case that broadcast went out
+before our window existed); `on_shell_restart` applies twice, 5 s apart, to
+catch ShellHost / StartMenuExperienceHost starting after the taskbar. And the
+DLL may be injected into Explorer before it loads `Taskbar.dll`: its watcher
+thread (explorer.exe only) keeps retrying the `_SetStuckMonitor` hook until
+`Taskbar.dll` and the RVA are both present, then nudges once.
 
 ## Extending the UI
 

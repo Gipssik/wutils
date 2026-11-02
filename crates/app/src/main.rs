@@ -11,6 +11,7 @@ mod inject;
 mod model;
 mod settings;
 mod shellreg;
+mod startup;
 mod symbols;
 mod tray;
 mod update;
@@ -53,10 +54,18 @@ const RESTART_FOR_MENU: &str = "Restart Explorer to apply the context menu chang
 const RESTART_FOR_UPDATE: &str = "Restart Explorer to finish updating Wutils.";
 
 fn main() -> Result<(), slint::PlatformError> {
-    if !tray::claim_single_instance() {
+    // Launched at sign-in (`--minimized` is what older versions registered).
+    let autostart = std::env::args().any(|a| a == startup::AUTOSTART_ARG || a == "--minimized");
+    // A sign-in launch that finds Wutils already running just exits; a user
+    // launch brings up the running instance's window.
+    if !tray::claim_single_instance(!autostart) {
         return Ok(());
     }
-    let start_minimized_arg = std::env::args().any(|a| a == "--minimized");
+    if autostart {
+        // Get the shell work done ahead of the other sign-in apps; dropped back
+        // to normal once the taskbar is handled (`startup::end_boost`).
+        startup::boost();
+    }
 
     // Diagnostic logging: `set WUTILS_LOG=1` before launching to trace the
     // taskbar injection into %LOCALAPPDATA%\Wutils\wutils.log.
@@ -77,7 +86,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let mut initial = State { settings, monitors: Vec::new(), pages: Vec::new(), page: 0, query: String::new() };
     initial.rebuild_pages();
-    let start_minimized = start_minimized_arg || initial.settings.general.start_minimized;
+    let start_minimized = autostart || initial.settings.general.start_minimized;
     let state = Rc::new(RefCell::new(initial));
 
     let signals = Signals {
@@ -309,7 +318,7 @@ fn apply_toggle(id: &str, value: bool, state: &Rc<RefCell<State>>, signals: &Sig
             let _ = features::apply_context_extensions(&snapshot);
         }
         "general.startup" => {
-            let _ = features::set_startup(snapshot.general.start_with_windows);
+            features::set_startup(snapshot.general.start_with_windows);
         }
         _ => {}
     }
@@ -338,9 +347,18 @@ fn start_tray(ui: &AppWindow) -> isize {
     // (no UI), so it's queued straight from the tray thread — not via the Slint
     // loop, which isn't pumping when the app started minimized with no window.
     // Settings on disk match the in-memory state (saved on every change).
+    //
+    // This is also how an app started at sign-in, before the shell, finds out it
+    // is up. ShellHost / StartMenuExperienceHost can come up a little after the
+    // taskbar, so a second pass a few seconds later injects those (idempotent:
+    // already-injected processes are skipped).
     let on_shell_restart = Box::new(|| {
         update::remove_stale_dlls();
         features::apply_taskbar_async(settings::Settings::load());
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            features::apply_taskbar_async(settings::Settings::load());
+        });
     });
 
     let (tx, rx) = mpsc::channel();

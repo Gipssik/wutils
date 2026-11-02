@@ -61,6 +61,8 @@ static SHARED: Shared = Shared {
 };
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+/// MinHook rejected `_SetStuckMonitor`; stop retrying it.
+static HOOK_GAVE_UP: AtomicBool = AtomicBool::new(false);
 
 static ORIG_MONITOR_FROM_POINT: AtomicUsize = AtomicUsize::new(0);
 static ORIG_MONITOR_FROM_RECT: AtomicUsize = AtomicUsize::new(0);
@@ -309,23 +311,38 @@ fn install() -> u32 {
         }
     }
 
-    // The core move: hook TrayUI::_SetStuckMonitor in Taskbar.dll (only present
-    // in the taskbar host process). Its RVA comes from the app via shared memory.
-    let rva = SHARED.set_stuck_rva.load(Acquire);
-    if rva != 0 {
-        if let Ok(taskbar) = unsafe { GetModuleHandleW(w!("Taskbar.dll")) } {
-            let target = (taskbar.0 as usize + rva as usize) as *mut c_void;
-            if hook_address(target, set_stuck_monitor_hook as *mut c_void, &ORIG_SET_STUCK_MONITOR) {
-                installed += 1;
-                wutils_core::log::line(&format!("hook: _SetStuckMonitor @ {target:p} installed"));
-            } else {
-                wutils_core::log::line("hook: _SetStuckMonitor FAILED");
-            }
-        }
+    if hook_set_stuck_monitor() {
+        installed += 1;
     }
 
     wutils_core::log::line(&format!("hook: installed {installed} hooks in {}", process_name()));
     installed
+}
+
+/// The core move: hooks TrayUI::_SetStuckMonitor in Taskbar.dll (only present
+/// in the taskbar host). Its RVA comes from the app via shared memory. Returns
+/// whether the hook is in place; it can't be yet when we were injected at logon
+/// before Explorer loaded Taskbar.dll, or before the app resolved the RVA — the
+/// watcher retries until both exist.
+fn hook_set_stuck_monitor() -> bool {
+    if ORIG_SET_STUCK_MONITOR.load(Acquire) != 0 {
+        return true;
+    }
+    let rva = SHARED.set_stuck_rva.load(Acquire);
+    if rva == 0 {
+        return false;
+    }
+    let Ok(taskbar) = (unsafe { GetModuleHandleW(w!("Taskbar.dll")) }) else { return false };
+    let target = (taskbar.0 as usize + rva as usize) as *mut c_void;
+    if hook_address(target, set_stuck_monitor_hook as *mut c_void, &ORIG_SET_STUCK_MONITOR) {
+        wutils_core::log::line(&format!("hook: _SetStuckMonitor @ {target:p} installed"));
+        true
+    } else {
+        // Don't retry a target MinHook rejected (it would fail the same way).
+        HOOK_GAVE_UP.store(true, Release);
+        wutils_core::log::line("hook: _SetStuckMonitor FAILED");
+        false
+    }
 }
 
 /// Creates and enables one MinHook detour, storing the trampoline in `slot`.
@@ -350,8 +367,9 @@ fn install_once() {
         // Trigger CTray::_HandleDisplayChange so _SetStuckMonitor runs with the
         // hook now active and the bar moves. Only the taskbar host has the window.
         wutils_core::explorer::notify_display_changed();
-        // The watcher only matters where _SetStuckMonitor lives (the taskbar host).
-        if ORIG_SET_STUCK_MONITOR.load(Acquire) != 0 {
+        // _SetStuckMonitor lives in explorer.exe (the taskbar host). The watcher
+        // also finishes hooking it if Taskbar.dll wasn't loaded yet (early logon).
+        if process_name() == "explorer.exe" {
             unsafe {
                 let _ = CreateThread(None, 0, Some(watcher_thread), None, THREAD_CREATE_RUN_IMMEDIATELY, None);
             }
@@ -361,11 +379,19 @@ fn install_once() {
 
 /// Polls the shared generation counter and re-applies (from inside the taskbar
 /// host) whenever the app changes config — the only reliable way to make the
-/// bar move on disable or a monitor change, not just on enable.
+/// bar move on disable or a monitor change, not just on enable. Until
+/// _SetStuckMonitor is hooked, it keeps trying (see `hook_set_stuck_monitor`).
 unsafe extern "system" fn watcher_thread(_: *mut c_void) -> u32 {
     let mut last = SHARED.generation.load(Acquire);
     loop {
         unsafe { Sleep(300) };
+        let _ = std::panic::catch_unwind(|| {
+            let hooked_before = ORIG_SET_STUCK_MONITOR.load(Acquire) != 0;
+            if !hooked_before && !HOOK_GAVE_UP.load(Acquire) && hook_set_stuck_monitor() {
+                // Just hooked: re-stick now that the detour is live.
+                wutils_core::explorer::notify_display_changed();
+            }
+        });
         let now = SHARED.generation.load(Acquire);
         if now != last {
             last = now;
