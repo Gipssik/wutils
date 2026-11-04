@@ -24,6 +24,10 @@ const ADD_RETRY_TIMER: usize = 1;
 const ADD_RETRY_MS: u32 = 1000;
 /// Two minutes of retries; `TaskbarCreated` still covers a later shell.
 const ADD_RETRY_MAX: u32 = 120;
+/// Debounces `WM_DISPLAYCHANGE`: a monitor coming up fires several in a row
+/// (attach, mode set, HDR renegotiation), so act once things have settled.
+const DISPLAY_SETTLE_TIMER: usize = 2;
+const DISPLAY_SETTLE_MS: u32 = 2000;
 /// `IDI_APPICON` in `wutils.rc`.
 const IDI_APPICON: u16 = 1;
 
@@ -37,6 +41,8 @@ pub struct Handlers {
     pub on_exit: Box<dyn Fn() + Send>,
     /// Explorer (re)started: re-inject the taskbar hook.
     pub on_shell_restart: Box<dyn Fn() + Send>,
+    /// Monitors were added, removed or rearranged (debounced).
+    pub on_display_change: Box<dyn Fn() + Send>,
 }
 
 thread_local! {
@@ -134,6 +140,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         return LRESULT(0);
     }
     match msg {
+        WM_DISPLAYCHANGE => {
+            // Re-arms the timer if one is pending, so a burst collapses to one call.
+            unsafe {
+                SetTimer(Some(hwnd), DISPLAY_SETTLE_TIMER, DISPLAY_SETTLE_MS, None);
+            }
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == DISPLAY_SETTLE_TIMER => {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), DISPLAY_SETTLE_TIMER);
+            }
+            HANDLERS.with(|h| {
+                if let Some(h) = h.borrow().as_ref() {
+                    (h.on_display_change)();
+                }
+            });
+            LRESULT(0)
+        }
         WM_TIMER if wparam.0 == ADD_RETRY_TIMER => {
             // Started before the shell (sign-in): once the icon goes in, the
             // taskbar exists, so apply what needed it — in case the
@@ -207,7 +231,7 @@ pub fn run(handlers: Handlers, hwnd_tx: Sender<isize>) {
         RegisterClassW(&wc);
         ICON.set(load_icon());
         // A hidden top-level window (not message-only: HWND_MESSAGE windows don't
-        // receive the TaskbarCreated broadcast).
+        // receive the TaskbarCreated or WM_DISPLAYCHANGE broadcasts).
         let hwnd = CreateWindowExW(
             Default::default(),
             class,

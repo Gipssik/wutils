@@ -112,6 +112,12 @@ sends it once after hooking, and a **watcher thread** in the DLL re-sends it
 whenever the app bumps `generation` in shared memory (enable/disable/monitor
 change). A cross-process nudge from the app alone does **not** work.
 
+**Monitor hot-plug.** The tray window also handles `WM_DISPLAYCHANGE`
+(debounced 2 s — a monitor waking up fires a burst) and re-applies the
+taskbar + refreshes the UI's monitor list (`on_display_change`). Without it,
+booting with one display and switching the second on later left the move
+disabled (apply found no target, so nothing was injected) until a restart.
+
 **Surviving Explorer restarts.** When Explorer restarts (including when the
 *classic-menu* feature restarts it) the DLL and tray icon are gone. The tray's
 hidden top-level window (not message-only — those don't get broadcasts) listens

@@ -50,6 +50,12 @@ struct Signals {
     restart: Arc<Mutex<Option<&'static str>>>,
 }
 
+thread_local! {
+    /// The UI state, for tray events that hop onto the UI thread (the tray
+    /// thread can't hold the `Rc`). Set once in `main`.
+    static UI_STATE: RefCell<Option<Rc<RefCell<State>>>> = const { RefCell::new(None) };
+}
+
 const RESTART_FOR_MENU: &str = "Restart Explorer to apply the context menu change.";
 const RESTART_FOR_UPDATE: &str = "Restart Explorer to finish updating Wutils.";
 
@@ -88,6 +94,7 @@ fn main() -> Result<(), slint::PlatformError> {
     initial.rebuild_pages();
     let start_minimized = autostart || initial.settings.general.start_minimized;
     let state = Rc::new(RefCell::new(initial));
+    UI_STATE.with(|s| *s.borrow_mut() = Some(state.clone()));
 
     let signals = Signals {
         update: Arc::new(Mutex::new(None)),
@@ -361,9 +368,29 @@ fn start_tray(ui: &AppWindow) -> isize {
         });
     });
 
+    // A monitor was connected, disconnected or rearranged — e.g. the second
+    // display switched on after booting with only one. The configured target
+    // may have just appeared (enable and inject now), vanished (pull the bar
+    // back to the real primary) or moved (republish its rect). Applied from
+    // the tray thread like `on_shell_restart`; the UI's monitor list refreshes
+    // whenever the Slint loop gets to it.
+    let display_weak = ui.as_weak();
+    let on_display_change = Box::new(move || {
+        wutils_core::log::line("display change");
+        features::apply_taskbar_async(settings::Settings::load());
+        let weak = display_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(state) = UI_STATE.with(|s| s.borrow().clone()) else { return };
+            state.borrow_mut().rebuild_pages();
+            if let Some(ui) = weak.upgrade() {
+                render(&ui, &state);
+            }
+        });
+    });
+
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        tray::run(tray::Handlers { on_open, on_exit, on_shell_restart }, tx);
+        tray::run(tray::Handlers { on_open, on_exit, on_shell_restart, on_display_change }, tx);
     });
     rx.recv().unwrap_or(0)
 }
