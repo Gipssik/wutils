@@ -8,6 +8,7 @@ slint::include_modules!();
 
 mod features;
 mod inject;
+mod keepactive;
 mod model;
 mod settings;
 mod shellreg;
@@ -227,6 +228,15 @@ fn wire_callbacks(ui: &AppWindow, state: &Rc<RefCell<State>>, signals: &Signals)
                 s.rebuild_pages();
                 features::apply_taskbar_async(s.settings.clone());
             }
+            if id == "presence.interval" {
+                let mut s = state.borrow_mut();
+                if let Some(&(secs, _)) = keepactive::INTERVALS.get(index.max(0) as usize) {
+                    s.settings.presence.interval_secs = secs;
+                }
+                let _ = s.settings.save();
+                s.rebuild_pages();
+                features::apply_keep_active(&s.settings);
+            }
             if let Some(ui) = weak.upgrade() {
                 render(&ui, &state);
             }
@@ -305,6 +315,7 @@ fn apply_toggle(id: &str, value: bool, state: &Rc<RefCell<State>>, signals: &Sig
             "updates.auto" => s.settings.updates.auto_check = value,
             "general.startup" => s.settings.general.start_with_windows = value,
             "general.minimized" => s.settings.general.start_minimized = value,
+            "presence.keep" => s.settings.presence.keep_active = value,
             _ => {}
         }
         let _ = s.settings.save();
@@ -327,6 +338,7 @@ fn apply_toggle(id: &str, value: bool, state: &Rc<RefCell<State>>, signals: &Sig
         "general.startup" => {
             features::set_startup(snapshot.general.start_with_windows);
         }
+        "presence.keep" => features::apply_keep_active(&snapshot),
         _ => {}
     }
 }

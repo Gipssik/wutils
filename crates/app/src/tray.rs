@@ -18,6 +18,7 @@ const WM_SHOW_EXISTING: u32 = WM_APP + 2;
 const TRAY_CLASS: PCWSTR = w!("WutilsTrayWnd");
 const ID_OPEN: usize = 1;
 const ID_EXIT: usize = 2;
+const ID_KEEP_ACTIVE: usize = 3;
 const TRAY_UID: u32 = 1;
 /// Retries `NIM_ADD` while the shell isn't up yet (started at sign-in).
 const ADD_RETRY_TIMER: usize = 1;
@@ -95,6 +96,14 @@ fn show_menu(hwnd: HWND) {
         };
         let _ = AppendMenuW(menu, MF_STRING, ID_OPEN, w!("Open Wutils"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        // Quick on/off for "Keep me active", only once it's enabled in settings.
+        // Read straight from `keepactive` (atomics, no UI state involved).
+        let keep_active = crate::keepactive::is_running();
+        if crate::keepactive::is_enabled() {
+            let check = if keep_active { MF_CHECKED } else { MF_UNCHECKED };
+            let _ = AppendMenuW(menu, MF_STRING | check, ID_KEEP_ACTIVE, w!("Keep me active"));
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        }
         let _ = AppendMenuW(menu, MF_STRING, ID_EXIT, w!("Exit"));
 
         let mut pt = POINT::default();
@@ -107,6 +116,10 @@ fn show_menu(hwnd: HWND) {
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
 
         let id = cmd.0 as usize;
+        if id == ID_KEEP_ACTIVE {
+            crate::keepactive::set_paused(keep_active);
+            return;
+        }
         HANDLERS.with(|h| {
             if let Some(h) = h.borrow().as_ref() {
                 match id {

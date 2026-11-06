@@ -135,6 +135,30 @@ pub fn pages(settings: &Settings, monitors: &[Monitor]) -> Vec<Page> {
         items: vec![header("HDR"), hdr_toggle],
     };
 
+    // --- Presence ---
+    let interval_labels: Vec<String> = crate::keepactive::INTERVALS.iter().map(|&(_, l)| l.to_string()).collect();
+    let presence = Page {
+        title: "Presence",
+        icon: "\u{E823}",
+        items: vec![
+            header("Away status"),
+            toggle(
+                "presence.keep",
+                "Keep me active",
+                "Stops Slack, Teams and similar apps from showing you as away by tapping the \
+                 unused F14 key whenever you've been idle for a while. This also keeps the \
+                 screen from locking or turning off.",
+                settings.presence.keep_active,
+            ),
+            SettingItem {
+                enabled: settings.presence.keep_active,
+                choices: choices(&interval_labels),
+                current: crate::keepactive::interval_index(settings.presence.interval_secs) as i32,
+                ..item("presence.interval", ItemKind::Choice, "Press after being idle for", "")
+            },
+        ],
+    };
+
     // --- Updates ---
     let updates = Page {
         title: "Updates",
@@ -173,7 +197,7 @@ pub fn pages(settings: &Settings, monitors: &[Monitor]) -> Vec<Page> {
         ],
     };
 
-    vec![taskbar, context, displays, updates, general]
+    vec![taskbar, context, displays, presence, updates, general]
 }
 
 /// Cards for one page.

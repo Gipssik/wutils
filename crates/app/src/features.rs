@@ -15,7 +15,7 @@ use wutils_core::clsid;
 use wutils_core::display::{self, Monitor};
 
 use crate::settings::Settings;
-use crate::{inject, shellreg, startup, symbols};
+use crate::{inject, keepactive, shellreg, startup, symbols};
 
 /// Directory the running executable lives in; DLLs sit next to it.
 pub fn exe_dir() -> PathBuf {
@@ -168,10 +168,16 @@ pub fn set_startup(enabled: bool) {
     startup::apply_async(enabled);
 }
 
+/// Keep-active F14 presser (see `keepactive`).
+pub fn apply_keep_active(settings: &Settings) {
+    keepactive::apply(settings.presence.keep_active, settings.presence.interval_secs);
+}
+
 /// Applies everything that can be set without restarting Explorer, on startup.
 /// (The classic-menu switch is applied separately so the UI can prompt.)
 pub fn apply_all_quiet(settings: &Settings) {
     let _ = apply_context_extensions(settings);
+    apply_keep_active(settings);
     apply_taskbar_async(settings.clone());
     set_startup(settings.general.start_with_windows);
 }

@@ -13,6 +13,22 @@ pub struct Settings {
     pub hdr: Hdr,
     pub updates: Updates,
     pub general: General,
+    pub presence: Presence,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct Presence {
+    /// Tap F14 when idle so chat apps don't show you as away.
+    pub keep_active: bool,
+    /// Idle time before each tap (one of `keepactive::INTERVALS`).
+    pub interval_secs: u32,
+}
+
+impl Default for Presence {
+    fn default() -> Self {
+        Self { keep_active: false, interval_secs: crate::keepactive::DEFAULT_INTERVAL_SECS }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

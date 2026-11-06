@@ -156,6 +156,19 @@ Classic-menu switch: `HKCU\...\CLSID\{86ca1aa0-...}\InprocServer32` with an empt
 default shadows the Win11 menu handler. Requires an Explorer restart (the UI
 prompts via a banner).
 
+### Keep active (`app/src/keepactive.rs`)
+Stops Slack/Teams from going "away": when the session has been idle
+(`GetLastInputInfo`) for the chosen interval, `SendInput` taps **F14** (bound to
+nothing). Pressing only when idle keeps it from combining with a held modifier
+mid-typing. One worker thread, started on first enable, sleeps until the idle
+time could reach the interval and parks while disabled. Resetting the idle timer
+also keeps the screen from locking/sleeping — intended, and said in the UI.
+
+While the feature is enabled, the tray menu shows a checked "Keep me active"
+item that pauses/resumes it (`keepactive::set_paused`, read straight from the
+tray thread — atomics only). The pause is runtime-only: it doesn't touch the
+saved setting and ends on app restart or when the feature is re-enabled.
+
 ### Updater (`app/src/update.rs`)
 Off unless enabled. Reads `releases/latest`, compares semver to
 `CARGO_PKG_VERSION`, downloads `wutils-x64.zip`, verifies its SHA-256 against the
